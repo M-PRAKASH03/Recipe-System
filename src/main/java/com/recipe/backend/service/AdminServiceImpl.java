@@ -11,8 +11,10 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -120,6 +122,7 @@ public class AdminServiceImpl implements AdminService {
 
     // -------------------- Add Recipe By Admin --------------------
     @Override
+    @Transactional
     public RecipeResponse addRecipeByAdmin(RecipeRequest request, String adminEmail) {
 
         User admin = userRepository.findByEmail(adminEmail)
@@ -128,11 +131,15 @@ public class AdminServiceImpl implements AdminService {
         Recipe recipe = new Recipe();
         recipe.setTitle(request.getTitle());
         recipe.setDescription(request.getDescription());
-        recipe.setCookingTime(request.getCookingTime());
-        recipe.setServings(request.getServings());
+        recipe.setCookingTime(request.getCookingTime() != null ? request.getCookingTime() : 0);
+        recipe.setServings(request.getServings() != null ? request.getServings() : 1);
         recipe.setApproved(true);
         recipe.setCreatedBy(admin);
         recipe.setCreatedAt(LocalDateTime.now());
+        recipe.setUpdatedAt(LocalDateTime.now());
+        recipe.setIngredients(new HashSet<>());
+
+        Recipe savedRecipe = recipeRepository.save(recipe);
 
         double totalCalories = 0;
         double totalProtein = 0;
@@ -141,34 +148,59 @@ public class AdminServiceImpl implements AdminService {
 
         if (request.getIngredients() != null) {
             for (IngredientRequest ir : request.getIngredients()) {
+                if (ir.getName() == null || ir.getName().isBlank()) continue;
 
-                Ingredient ingredient = new Ingredient();
-                ingredient.setName(ir.getName());
-                ingredient.setQuantity(ir.getQuantity());
-                ingredient.setUnit(ir.getUnit());
+                Ingredient ingredient;
+                if (ir.getCalories() == null || ir.getProtein() == null) {
+                    ingredient = ingredientService.resolveIngredientNutrition(
+                            ir.getName(),
+                            ir.getQuantity() != null ? ir.getQuantity() : 0.0,
+                            ir.getUnit() != null ? ir.getUnit() : "g",
+                            savedRecipe
+                    );
+                } else {
+                    ingredient = new Ingredient();
+                    ingredient.setName(ir.getName());
+                    ingredient.setQuantity(ir.getQuantity() != null ? ir.getQuantity() : 0.0);
+                    ingredient.setUnit(ir.getUnit() != null ? ir.getUnit() : "g");
+                    ingredient.setRecipe(savedRecipe);
+                }
 
-                ingredient.setCalories(ir.getCalories());
-                ingredient.setProtein(ir.getProtein());
-                ingredient.setCarbs(ir.getCarbs());
-                ingredient.setFats(ir.getFats());
+                ingredient.setCalories(ir.getCalories() != null ? ir.getCalories() : (ingredient.getCalories() != null ? ingredient.getCalories() : 0.0));
+                ingredient.setProtein(ir.getProtein() != null ? ir.getProtein() : (ingredient.getProtein() != null ? ingredient.getProtein() : 0.0));
+                ingredient.setCarbs(ir.getCarbs() != null ? ir.getCarbs() : (ingredient.getCarbs() != null ? ingredient.getCarbs() : 0.0));
+                ingredient.setFats(ir.getFats() != null ? ir.getFats() : (ingredient.getFats() != null ? ingredient.getFats() : 0.0));
+                ingredient.setRecipe(savedRecipe);
 
-                ingredient.setRecipe(recipe);
-                recipe.getIngredients().add(ingredient);
+                savedRecipe.getIngredients().add(ingredient);
 
-                totalCalories += ir.getCalories() != null ? ir.getCalories() : 0;
-                totalProtein += ir.getProtein() != null ? ir.getProtein() : 0;
-                totalCarbs += ir.getCarbs() != null ? ir.getCarbs() : 0;
-                totalFats += ir.getFats() != null ? ir.getFats() : 0;
+                totalCalories += ingredient.getCalories();
+                totalProtein += ingredient.getProtein();
+                totalCarbs += ingredient.getCarbs();
+                totalFats += ingredient.getFats();
             }
         }
 
-        recipe.setTotalCalories(totalCalories);
-        recipe.setTotalProtein(totalProtein);
-        recipe.setTotalCarbs(totalCarbs);
-        recipe.setTotalFats(totalFats);
+        if (totalCalories == 0 && request.getTotalCalories() != null) {
+            totalCalories = request.getTotalCalories();
+        }
+        if (totalProtein == 0 && request.getTotalProtein() != null) {
+            totalProtein = request.getTotalProtein();
+        }
+        if (totalCarbs == 0 && request.getTotalCarbs() != null) {
+            totalCarbs = request.getTotalCarbs();
+        }
+        if (totalFats == 0 && request.getTotalFats() != null) {
+            totalFats = request.getTotalFats();
+        }
 
-        Recipe saved = recipeRepository.save(recipe);
-        return MapperUtil.toRecipeResponse(saved);
+        savedRecipe.setTotalCalories(totalCalories);
+        savedRecipe.setTotalProtein(totalProtein);
+        savedRecipe.setTotalCarbs(totalCarbs);
+        savedRecipe.setTotalFats(totalFats);
+
+        Recipe finalSaved = recipeRepository.save(savedRecipe);
+        return recipeMapper.toResponse(finalSaved);
     }
 
 //    // -------------------- Get My Recipes --------------------
